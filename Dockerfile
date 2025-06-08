@@ -1,0 +1,33 @@
+# Use Debian slim for avahi-utils support
+FROM debian:stable-slim
+
+LABEL maintainer="KrX3D"
+
+# Install dependencies
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      avahi-utils \
+      curl \
+      jq \
+ && rm -rf /var/lib/apt/lists/*
+
+# Create backup directory
+ENV BACKUP_DIR=/backups
+
+RUN mkdir -p ${BACKUP_DIR} \
+ && chown root:root ${BACKUP_DIR}
+
+# Copy our scripts
+COPY backup-scripts/backup-one.sh /usr/local/bin/backup-one.sh
+COPY backup-scripts/backup-discover.sh /usr/local/bin/backup-discover.sh
+
+RUN chmod +x /usr/local/bin/backup-one.sh /usr/local/bin/backup-discover.sh
+
+# Default entrypoint
+ENTRYPOINT ["/usr/local/bin/backup-discover.sh"]
+
+# By default, expect /backups mounted as a volume
+VOLUME ["/backups"]
+
+# Use host networking for mDNS discovery
+# You must start container with --network=host
