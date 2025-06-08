@@ -72,7 +72,7 @@ jobs:
             | gzip > wled-backup.tar.gz
 
       - name: Upload Unraid package
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: wled-backup-unraid-package
           path: wled-backup.tar.gz
