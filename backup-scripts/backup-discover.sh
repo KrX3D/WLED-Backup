@@ -2,7 +2,7 @@
 #
 # backup-discover.sh
 #   Discovers WLED hosts via mDNS + EXTRA_HOSTS,
-#   runs backup-one.sh in a timestamped folder,
+#   runs backup-one.sh for each with an index,
 #   then prunes old runs.
 
 set -euo pipefail
@@ -15,42 +15,47 @@ BACKUP_ROOT="${BACKUP_ROOT:-/backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 EXTRA_HOSTS="${EXTRA_HOSTS:-}"
 
-# 1) Make run directory
+# 1) Create run directory
 TIMESTAMP="$(date +'%Y%m%d_%H%M%S')"
 export BACKUP_DIR="${BACKUP_ROOT}/${TIMESTAMP}"
 mkdir -p "$BACKUP_DIR"
-LOG "[INFO] Created backup directory: $BACKUP_DIR"
+LOG "[INFO] New backup run: $BACKUP_DIR"
 
 # 2) Discover via mDNS
-LOG "[INFO] Discovering via mDNS..."
+LOG "[INFO] Discovering WLED via mDNS..."
 mapfile -t MDNS < <(
   avahi-browse -r -p "$SERVICE" --terminate \
-    | awk -F';' '/^=/ {print $7".local"}' | sort -u
+    | awk -F';' '/^=/ {print $7".local"}' \
+    | sort -u
 )
 
-# 3) Add any EXTRA_HOSTS (comma-separated)
+# 3) Merge EXTRA_HOSTS if any
 HOSTS=( "${MDNS[@]}" )
 if [ -n "$EXTRA_HOSTS" ]; then
-  LOG "[INFO] Including EXTRA_HOSTS: $EXTRA_HOSTS"
+  LOG "[INFO] Adding EXTRA_HOSTS: $EXTRA_HOSTS"
   IFS=',' read -ra EXTRA <<< "$EXTRA_HOSTS"
   HOSTS+=( "${EXTRA[@]}" )
 fi
 
-# dedupe & filter blank
+# dedupe and filter blanks
 readarray -t HOSTS < <(printf '%s\n' "${HOSTS[@]}" | grep -v '^$' | sort -u)
 
 if [ ${#HOSTS[@]} -eq 0 ]; then
-  LOG "[INFO] No hosts to back up."
+  LOG "[INFO] No hosts found."
   exit 0
 fi
 
-LOG "[INFO] Will back up:"
-for h in "${HOSTS[@]}"; do LOG "  - $h"; done
+LOG "[INFO] Hosts to back up:"
+for i in "${!HOSTS[@]}"; do
+  LOG "  $((i+1)). ${HOSTS[i]}"
+done
 
-# 4) Backup each
+# 4) Back up each, passing index (1-based)
 FAIL=0
-for H in "${HOSTS[@]}"; do
-  if ! "$SCRIPT" "$H"; then
+for i in "${!HOSTS[@]}"; do
+  idx=$((i+1))
+  H="${HOSTS[i]}"
+  if ! "$SCRIPT" "$H" "$idx"; then
     LOG "[ERROR] backup-one.sh failed for $H"
     FAIL=1
   fi
