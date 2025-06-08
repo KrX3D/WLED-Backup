@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # backup-one.sh <hostname>
-#   Fetches cfg.json and presets.json from one WLED host.
-#   Logs progress with timestamps and follows redirects.
+#   Fetches configured JSON endpoints from one WLED host,
+#   auto-tries HTTP/HTTPS, logs with timestamps.
 
 set -euo pipefail
 
@@ -10,26 +10,43 @@ LOG() { echo "$(date +'%Y-%m-%d %H:%M:%S') $@"; }
 
 [ $# -eq 1 ] || { LOG "[ERROR] Usage: $0 <hostname>"; exit 1; }
 HOST="$1"
-DEST_DIR="${BACKUP_DIR:?Needs BACKUP_DIR set to a writable path}"
+DEST_DIR="${BACKUP_DIR:?Environment variable BACKUP_DIR must be set}"
 JQ_CMD=$(command -v jq || true)
 
-LOG "[INFO] Starting backup for host: $HOST"
+# endpoints to fetch by default
+ENDPOINTS=(cfg.json presets.json)
 
-for ENDPOINT in cfg.json presets.json; do
-  URL="http://$HOST/$ENDPOINT"
-  OUT="${DEST_DIR}/${HOST}.${ENDPOINT}"
-  LOG "[INFO] Fetching $URL → $OUT"
-  if curl -sSLf "$URL" -o "$OUT"; then
-    LOG "[INFO] Saved $OUT"
-    # pretty-print if jq is present
-    if [ -n "$JQ_CMD" ]; then
-      LOG "[INFO] Formatting JSON: $OUT"
-      "$JQ_CMD" . "$OUT" > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
+# allow extra endpoints, e.g. "json/state,json/info"
+if [ -n "${ADDITIONAL_ENDPOINTS:-}" ]; then
+  IFS=',' read -ra EXTRA <<< "$ADDITIONAL_ENDPOINTS"
+  ENDPOINTS+=( "${EXTRA[@]}" )
+fi
+
+LOG "[INFO] Backing up host: $HOST"
+
+for EP in "${ENDPOINTS[@]}"; do
+  SUCCESS=false
+  for PROTO in http https; do
+    URL="$PROTO://$HOST/$EP"
+    OUT="$DEST_DIR/$HOST.$EP"
+    LOG "[INFO] Trying $URL → $OUT"
+    if curl -sSLf "$URL" -o "$OUT"; then
+      LOG "[INFO] Saved $OUT"
+      SUCCESS=true
+      # pretty-print JSON if possible
+      if [ -n "$JQ_CMD" ] && [[ "$OUT" == *.json ]]; then
+        LOG "[INFO] Formatting JSON: $OUT"
+        "$JQ_CMD" . "$OUT" > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
+      fi
+      break
+    else
+      LOG "[WARN] $PROTO failed for $EP"
     fi
-  else
-    LOG "[ERROR] Failed to fetch $URL"
-    return 1
+  done
+  if [ "$SUCCESS" != true ]; then
+    LOG "[ERROR] Could not fetch any protocol for $EP from $HOST"
+    exit 2
   fi
 done
 
-LOG "[INFO] Backup completed for $HOST"
+LOG "[INFO] Completed backup for $HOST"
