@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 #
 # backup-one.sh <hostname> <index>
-#   Uses absolute paths for date & curl to avoid PATH issues.
+#   - Fixed LOG to not pass extra args to date.
+#   - Uses absolute paths for curl & jq to avoid PATH issues.
 
 set -euo pipefail
 
-# Explicitly set PATH so we find coreutils, curl, jq, etc.
-export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-
+# LOG <LEVEL> <MESSAGE...>
 LOG() {
-  # use absolute path to date
-  /bin/date +'%Y-%m-%d %H:%M:%S' "[$1]" "${@:2}"
+  local level="$1"; shift
+  # date only gets its format, all other args go to echo
+  local ts
+  ts=$(/bin/date +'%Y-%m-%d %H:%M:%S')
+  echo "$ts [$level] $*"
 }
 
 if [ $# -lt 2 ]; then
@@ -21,25 +23,25 @@ fi
 HOST="$1"; IDX="$2"
 RUN_DIR="${BACKUP_DIR:?BACKUP_DIR must be set}"
 
-# Build curl options
-CURL_OPTS=( /usr/bin/curl -sSLf )
+# Build curl command array
+CURL_CMD=( /usr/bin/curl -sSLf )
 if [ "${SKIP_TLS_VERIFY:-false}" = "true" ]; then
-  CURL_OPTS+=( -k )
+  CURL_CMD+=( -k )
   LOG WARN "TLS certificate verification is disabled"
 fi
 
-# 1) Fetch cfg.json to extract .id.name
+# 1) Fetch cfg.json for name
 TMP_CFG="$(mktemp)"
-if ! "${CURL_OPTS[@]}" "http://$HOST/cfg.json" -o "$TMP_CFG" \
-    && ! "${CURL_OPTS[@]}" "https://$HOST/cfg.json" -o "$TMP_CFG"; then
+if ! "${CURL_CMD[@]}" "http://$HOST/cfg.json" -o "$TMP_CFG" \
+    && ! "${CURL_CMD[@]}" "https://$HOST/cfg.json" -o "$TMP_CFG"; then
   LOG ERROR "Could not fetch cfg.json from $HOST"
   rm -f "$TMP_CFG"
   exit 2
 fi
 
-# 2) Extract id.name via jq, fallback to device<index>
+# 2) Extract id.name
 DEV_NAME=""
-if command -v jq >/dev/null; then
+if command -v /usr/bin/jq &>/dev/null; then
   DEV_NAME=$(/usr/bin/jq -r '.id.name // empty' "$TMP_CFG")
 fi
 rm -f "$TMP_CFG"
@@ -68,7 +70,7 @@ fi
 # 4) Protocol order
 IFS=',' read -ra PROT_ARRAY <<< "${PROTOCOLS:-http,https}"
 
-# 5) Loop and fetch
+# 5) Loop and fetch each key
 for KEY in "${KEYS[@]}"; do
   case "$KEY" in
     cfg)     PATH_SUFFIX="cfg.json"     ;;
@@ -82,11 +84,11 @@ for KEY in "${KEYS[@]}"; do
   for P in "${PROT_ARRAY[@]}"; do
     URL="$P://$HOST/$PATH_SUFFIX"
     LOG INFO "Trying $URL → $OUT"
-    if "${CURL_OPTS[@]}" "$URL" -o "$OUT"; then
+    if "${CURL_CMD[@]}" "$URL" -o "$OUT"; then
       LOG INFO "Saved $OUT"
       SUCCESS=true
       # pretty‐print
-      if command -v jq >/dev/null; then
+      if command -v /usr/bin/jq &>/dev/null; then
         LOG INFO "Formatting $OUT"
         /usr/bin/jq . "$OUT" > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
       fi
