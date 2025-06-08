@@ -1,54 +1,53 @@
 #!/usr/bin/env bash
 #
 # backup-discover.sh
-#   Discovers all WLED instances via mDNS PLUS any EXTRA_HOSTS,
-#   then calls backup-one.sh for each in a timestamped folder,
-#   and prunes old runs based on RETENTION_DAYS.
+#   Discovers WLED hosts via mDNS + EXTRA_HOSTS,
+#   runs backup-one.sh in a timestamped folder,
+#   then prunes old runs.
 
 set -euo pipefail
 
 LOG() { echo "$(date +'%Y-%m-%d %H:%M:%S') $@"; }
 
 SERVICE="_wled._tcp"
-SCRIPT="$(dirname "$0")/backup-one.sh"
-BACKUP_ROOT="${BACKUP_ROOT:-/backups}"      # host-mounted root dir
-RETENTION_DAYS="${RETENTION_DAYS:-30}"      # delete runs older than this
+SCRIPT="/usr/local/bin/backup-one.sh"
+BACKUP_ROOT="${BACKUP_ROOT:-/backups}"
+RETENTION_DAYS="${RETENTION_DAYS:-30}"
+EXTRA_HOSTS="${EXTRA_HOSTS:-}"
 
-# create this run's folder
+# 1) Make run directory
 TIMESTAMP="$(date +'%Y%m%d_%H%M%S')"
 export BACKUP_DIR="${BACKUP_ROOT}/${TIMESTAMP}"
 mkdir -p "$BACKUP_DIR"
-LOG "[INFO] New backup run directory: $BACKUP_DIR"
+LOG "[INFO] Created backup directory: $BACKUP_DIR"
 
-# 1) discover via mDNS
-LOG "[INFO] Discovering WLED devices via mDNS..."
+# 2) Discover via mDNS
+LOG "[INFO] Discovering via mDNS..."
 mapfile -t MDNS < <(
   avahi-browse -r -p "$SERVICE" --terminate \
-    | awk -F';' '/^=/ {printf "%s.local\n",$7}' \
-    | sort -u
+    | awk -F';' '/^=/ {print $7".local"}' | sort -u
 )
 
-# 2) include any EXTRA_HOSTS
-EXTRA_LIST=()
-if [ -n "${EXTRA_HOSTS:-}" ]; then
-  LOG "[INFO] Adding EXTRA_HOSTS: $EXTRA_HOSTS"
-  IFS=',' read -ra EXTRA_LIST <<< "$EXTRA_HOSTS"
+# 3) Add any EXTRA_HOSTS (comma-separated)
+HOSTS=( "${MDNS[@]}" )
+if [ -n "$EXTRA_HOSTS" ]; then
+  LOG "[INFO] Including EXTRA_HOSTS: $EXTRA_HOSTS"
+  IFS=',' read -ra EXTRA <<< "$EXTRA_HOSTS"
+  HOSTS+=( "${EXTRA[@]}" )
 fi
 
-# merge & dedupe
-ALL=( "${MDNS[@]}" "${EXTRA_LIST[@]}" )
-# filter out blanks, dedupe
-readarray -t HOSTS < <(printf '%s\n' "${ALL[@]}" | grep -v '^$' | sort -u)
+# dedupe & filter blank
+readarray -t HOSTS < <(printf '%s\n' "${HOSTS[@]}" | grep -v '^$' | sort -u)
 
 if [ ${#HOSTS[@]} -eq 0 ]; then
-  LOG "[INFO] No hosts found via mDNS or EXTRA_HOSTS."
+  LOG "[INFO] No hosts to back up."
   exit 0
 fi
 
-LOG "[INFO] Will back up the following hosts:"
-for h in "${HOSTS[@]}"; do echo "  - $h"; done
+LOG "[INFO] Will back up:"
+for h in "${HOSTS[@]}"; do LOG "  - $h"; done
 
-# 3) loop & back up
+# 4) Backup each
 FAIL=0
 for H in "${HOSTS[@]}"; do
   if ! "$SCRIPT" "$H"; then
@@ -58,14 +57,14 @@ for H in "${HOSTS[@]}"; do
 done
 
 if [ $FAIL -ne 0 ]; then
-  LOG "[ERROR] One or more backups failed."
+  LOG "[ERROR] Some backups failed."
   exit 2
+else
+  LOG "[INFO] All backups succeeded."
 fi
 
-LOG "[INFO] All backups completed successfully."
-
-# 4) prune old runs
-LOG "[INFO] Pruning backup runs older than $RETENTION_DAYS days..."
+# 5) Prune old runs
+LOG "[INFO] Pruning runs older than $RETENTION_DAYS days..."
 find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d \
   -mtime +"$RETENTION_DAYS" -print -exec rm -rf {} \;
 LOG "[INFO] Prune complete."
