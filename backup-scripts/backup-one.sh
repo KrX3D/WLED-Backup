@@ -1,75 +1,93 @@
 #!/usr/bin/env bash
 #
-# backup-one.sh <hostname>
+# backup-one.sh <hostname> <index>
 #   Fetches JSON endpoints from one WLED host,
-#   auto-tries protocols from $PROTOCOLS,
-#   supports skipping TLS verify, and logs with timestamps.
+#   names its folder by id.name or device<index>,
+#   supports dynamic endpoints, protocol fallback,
+#   optional TLS skip, and logging.
 
 set -euo pipefail
 
 LOG() { echo "$(date +'%Y-%m-%d %H:%M:%S') $@"; }
 
-[ $# -eq 1 ] || { LOG "[ERROR] Usage: $0 <hostname>"; exit 1; }
+if [ $# -lt 2 ]; then
+  LOG "[ERROR] Usage: $0 <hostname> <index>"
+  exit 1
+fi
+
 HOST="$1"
-DEST_DIR="${BACKUP_DIR:?BACKUP_DIR must be set}"
+IDX="$2"
+RUN_DIR="${BACKUP_DIR:?BACKUP_DIR must be set}"
+
 JQ_CMD=$(command -v jq || true)
 
-# Default endpoints
-ENDPOINTS=(
-  cfg.json
-  presets.json
-  json/state
-  json/info
-  json/si
-  json/nodes
-  json/eff
-  json/palx
-  json/fxdata
-  json/net
-  json/live
-  json/pal
-  json/cfg
-)
+# 1) Fetch cfg.json first to extract device name
+TMP_CFG="$(mktemp)"
+LOG "[INFO] Fetching cfg.json for name resolution"
+curl_opts="-sSLf"
+if [ "${SKIP_TLS_VERIFY:-false}" = "true" ]; then
+  curl_opts="$curl_opts -k"
+  LOG "[WARN] TLS certificate verification is disabled"
+fi
 
-# Extra endpoints?
+if ! curl $curl_opts "${PROTOCOLS:-http,https}" | awk -v host="$HOST" -v pf="$curl_opts" \
+   'BEGIN{split(protos,",",p)} END{}' ; then
+  # Sorry, simpler: we try http then https explicitly:
+  if ! curl $curl_opts "http://$HOST/cfg.json" -o "$TMP_CFG" \
+     && ! curl $curl_opts "https://$HOST/cfg.json" -o "$TMP_CFG"; then
+    LOG "[ERROR] Could not fetch cfg.json from $HOST"
+    rm -f "$TMP_CFG"
+    exit 2
+  fi
+fi
+
+# parse device name
+if [ -n "$JQ_CMD" ]; then
+  DEV_NAME=$(jq -r '.id.name // empty' "$TMP_CFG")
+fi
+rm -f "$TMP_CFG"
+
+# sanitize or fallback
+if [ -n "${DEV_NAME:-}" ]; then
+  DIR_NAME="${DEV_NAME//[^[:alnum:]-_]/_}"
+else
+  DIR_NAME="device${IDX}"
+fi
+
+HOST_DIR="$RUN_DIR/$DIR_NAME"
+mkdir -p "$HOST_DIR"
+LOG "[INFO] Created device folder: $HOST_DIR"
+
+# 2) Determine endpoints list
+if [ -n "${ENDPOINTS:-}" ]; then
+  IFS=',' read -ra ENDPOINTS_LIST <<< "$ENDPOINTS"
+else
+  ENDPOINTS_LIST=( "cfg.json" "json/state" )
+fi
 if [ -n "${ADDITIONAL_ENDPOINTS:-}" ]; then
   IFS=',' read -ra EXTRA <<< "$ADDITIONAL_ENDPOINTS"
-  ENDPOINTS+=( "${EXTRA[@]}" )
+  ENDPOINTS_LIST+=( "${EXTRA[@]}" )
 fi
 
-# Protocols to try, in order
-PROTOCOLS="${PROTOCOLS:-http,https}"
+# 3) Protocols
+IFS=',' read -ra PROT_ARR <<< "${PROTOCOLS:-http,https}"
 
-# curl options
-CURL_OPTS="-sSLf"
-if [ "${SKIP_TLS_VERIFY:-false}" = "true" ]; then
-  CURL_OPTS="$CURL_OPTS -k"
-  LOG "[WARN] TLS certificate verification is disabled (SKIP_TLS_VERIFY=true)"
-fi
-
-LOG "[INFO] Backing up host: $HOST"
-
-for EP in "${ENDPOINTS[@]}"; do
-  # generate output filename
-  SAFE_EP="${EP//\//_}"            # json/state → json_state
-  if [[ "$SAFE_EP" == *.* ]]; then
-    OUT="$DEST_DIR/$HOST.$SAFE_EP"
-  else
-    OUT="$DEST_DIR/$HOST.$SAFE_EP.json"
-  fi
+# 4) Fetch each endpoint
+for EP in "${ENDPOINTS_LIST[@]}"; do
+  SAFE_EP="${EP//\//_}"
+  OUT="$HOST_DIR/$SAFE_EP"
+  [[ "$OUT" != *.json ]] && OUT="$OUT.json"
 
   SUCCESS=false
-  IFS=',' read -ra PROT_ARR <<< "$PROTOCOLS"
   for P in "${PROT_ARR[@]}"; do
     URL="$P://$HOST/$EP"
     LOG "[INFO] Trying $URL → $OUT"
-    if curl $CURL_OPTS "$URL" -o "$OUT"; then
+    if curl $curl_opts "$URL" -o "$OUT"; then
       LOG "[INFO] Saved $OUT"
       SUCCESS=true
-      # pretty‐print JSON
-      if [ -n "$JQ_CMD" ] && [[ "$OUT" == *.json ]]; then
+      if [ -n "$JQ_CMD" ]; then
         LOG "[INFO] Formatting JSON: $OUT"
-        "$JQ_CMD" . "$OUT" > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
+        jq . "$OUT" > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
       fi
       break
     else
@@ -77,10 +95,10 @@ for EP in "${ENDPOINTS[@]}"; do
     fi
   done
 
-  if [ "$SUCCESS" != true ]; then
-    LOG "[ERROR] Could not fetch $EP from $HOST using [$PROTOCOLS]"
+  if ! $SUCCESS; then
+    LOG "[ERROR] Could not fetch $EP from $HOST using [${PROTOCOLS:-http,https}]"
     exit 2
   fi
 done
 
-LOG "[INFO] Completed backup for $HOST"
+LOG "[INFO] Completed backup for $HOST ($DIR_NAME)"
