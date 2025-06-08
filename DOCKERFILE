@@ -7,7 +7,7 @@ LABEL maintainer="KrX3D"
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       bash \
-      coreutils \          # for `date`
+      coreutils \
       avahi-utils \
       curl \
       jq \
