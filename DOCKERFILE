@@ -12,6 +12,7 @@ RUN apt-get update \
       curl \
       jq \
       ca-certificates \
+      dos2unix \
  && rm -rf /var/lib/apt/lists/*
 
 # Create backup directory
