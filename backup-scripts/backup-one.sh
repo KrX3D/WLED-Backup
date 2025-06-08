@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # backup-one.sh <hostname>
-#   Fetches configured JSON endpoints from one WLED host,
+#   Fetches a set of JSON endpoints from one WLED host,
 #   auto-tries HTTP/HTTPS, logs with timestamps.
 
 set -euo pipefail
@@ -13,10 +13,24 @@ HOST="$1"
 DEST_DIR="${BACKUP_DIR:?Environment variable BACKUP_DIR must be set}"
 JQ_CMD=$(command -v jq || true)
 
-# endpoints to fetch by default
-ENDPOINTS=(cfg.json presets.json)
+# Default WLED API endpoints
+ENDPOINTS=(
+  cfg.json            # legacy
+  presets.json        # legacy
+  json/state
+  json/info
+  json/si
+  json/nodes
+  json/eff
+  json/palx
+  json/fxdata
+  json/net
+  json/live           # only if you compiled with WLED_ENABLE_JSONLIVE
+  json/pal
+  json/cfg
+)
 
-# allow extra endpoints, e.g. "json/state,json/info"
+# Add extra endpoints via env var, e.g. "json/custom,json/extra"
 if [ -n "${ADDITIONAL_ENDPOINTS:-}" ]; then
   IFS=',' read -ra EXTRA <<< "$ADDITIONAL_ENDPOINTS"
   ENDPOINTS+=( "${EXTRA[@]}" )
@@ -28,7 +42,8 @@ for EP in "${ENDPOINTS[@]}"; do
   SUCCESS=false
   for PROTO in http https; do
     URL="$PROTO://$HOST/$EP"
-    OUT="$DEST_DIR/$HOST.$EP"
+    # replace slashes for filename
+    OUT="$DEST_DIR/$HOST.${EP//\//_}.json"
     LOG "[INFO] Trying $URL → $OUT"
     if curl -sSLf "$URL" -o "$OUT"; then
       LOG "[INFO] Saved $OUT"
@@ -44,7 +59,7 @@ for EP in "${ENDPOINTS[@]}"; do
     fi
   done
   if [ "$SUCCESS" != true ]; then
-    LOG "[ERROR] Could not fetch any protocol for $EP from $HOST"
+    LOG "[ERROR] Could not fetch endpoint $EP from $HOST"
     exit 2
   fi
 done
