@@ -3,8 +3,8 @@
 # backup-discover.sh
 #   Discovers WLED hosts via mDNS + EXTRA_HOSTS,
 #   runs backup-one.sh for each with an index,
-#   removes any empty device folders in this run,
-#   then prunes old runs (logging each removal).
+#   removes any empty device folders and possibly the run dir if empty,
+#   then prunes old runs with clear logging.
 
 set -euo pipefail
 
@@ -43,9 +43,10 @@ readarray -t HOSTS < <(printf '%s\n' "${HOSTS[@]}" | grep -v '^$' | sort -u)
 
 if [ ${#HOSTS[@]} -eq 0 ]; then
   LOG "[INFO] No hosts found."
-  # Optionally: remove the run directory if empty?
-  # It is empty now; remove it so prune won't need to touch it.
-  rmdir "$BACKUP_DIR" && LOG "[INFO] Removed empty run directory: $BACKUP_DIR"
+  # Remove the empty run directory, since nothing to back up
+  if rmdir "$BACKUP_DIR"; then
+    LOG "[INFO] Removed empty run directory: $BACKUP_DIR"
+  fi
   exit 0
 fi
 
@@ -69,25 +70,50 @@ done
 # For example, if backup-one.sh failed early and left an empty subfolder.
 LOG "[INFO] Checking for empty device folders in this run..."
 while IFS= read -r -d '' DIR; do
-  # DIR is something like /backups/<timestamp>/<deviceName>
+  # DIR is: /backups/<timestamp>/<deviceName>
   if [ -d "$DIR" ] && [ -z "$(ls -A "$DIR")" ]; then
-    rmdir "$DIR" && LOG "[INFO] Removed empty device folder: $DIR"
+    if rmdir "$DIR"; then
+      LOG "[INFO] Removed empty device folder: $DIR"
+    fi
   fi
 done < <(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d -print0)
 
+# If after removing empty device folders, the run dir itself is empty, remove it
+if [ -z "$(ls -A "$BACKUP_DIR")" ]; then
+  if rmdir "$BACKUP_DIR"; then
+    LOG "[INFO] All device folders removed; removed run directory: $BACKUP_DIR"
+  fi
+  # We still go on to prune older runs
+fi
+
 if [ $FAIL -ne 0 ]; then
   LOG "[ERROR] Some backups failed."
-  # decide: exit with error or continue to prune old runs? We'll still prune.
 else
   LOG "[INFO] All backups succeeded."
 fi
 
-# 5) Prune old runs
-LOG "[INFO] Pruning runs older than $RETENTION_DAYS days..."
-# Find directories (only under BACKUP_ROOT) older than RETENTION_DAYS
-# We’ll log each before removal.
+# --- 5) Prune old runs ---
+#
+# find’s -mtime semantics: 
+#   -mtime +n matches items whose data was last modified *strictly more than* n*24h ago.
+#   E.g., -mtime +0 matches files modified more than 24h ago.
+#
+# If RETENTION_DAYS=1, we want to remove runs older than 24h. I.e., use -mtime +0.
+# If RETENTION_DAYS=30, remove runs older than 30*24h; I.e., -mtime +29 (strictly >29 days),
+# but often admins want "keep last N days, delete anything older than N days". 
+# Using -mtime +$((RETENTION_DAYS-1)) approximates that.
+#
+# For RETENTION_DAYS <= 1, we use -mtime +0 (remove >24h). For >1, use +RETENTION_DAYS-1.
+
+if [ "$RETENTION_DAYS" -le 1 ]; then
+  MTDAYS=0
+else
+  MTDAYS=$((RETENTION_DAYS - 1))
+fi
+
+LOG "[INFO] Pruning runs older than ${RETENTION_DAYS} day(s) (find -mtime +${MTDAYS})..."
 while IFS= read -r -d '' OLD_DIR; do
   LOG "[INFO] Removing old run directory: $OLD_DIR"
   rm -rf "$OLD_DIR"
-done < <(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +"$RETENTION_DAYS" -print0)
+done < <(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +"$MTDAYS" -print0)
 LOG "[INFO] Prune complete."
