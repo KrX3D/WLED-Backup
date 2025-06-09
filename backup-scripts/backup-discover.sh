@@ -3,7 +3,8 @@
 # backup-discover.sh
 #   Discovers WLED hosts via mDNS + EXTRA_HOSTS,
 #   runs backup-one.sh for each with an index,
-#   then prunes old runs.
+#   removes any empty device folders in this run,
+#   then prunes old runs (logging each removal).
 
 set -euo pipefail
 
@@ -42,6 +43,9 @@ readarray -t HOSTS < <(printf '%s\n' "${HOSTS[@]}" | grep -v '^$' | sort -u)
 
 if [ ${#HOSTS[@]} -eq 0 ]; then
   LOG "[INFO] No hosts found."
+  # Optionally: remove the run directory if empty?
+  # It is empty now; remove it so prune won't need to touch it.
+  rmdir "$BACKUP_DIR" && LOG "[INFO] Removed empty run directory: $BACKUP_DIR"
   exit 0
 fi
 
@@ -61,15 +65,29 @@ for i in "${!HOSTS[@]}"; do
   fi
 done
 
+# 4a) Remove any empty device folders in this run
+# For example, if backup-one.sh failed early and left an empty subfolder.
+LOG "[INFO] Checking for empty device folders in this run..."
+while IFS= read -r -d '' DIR; do
+  # DIR is something like /backups/<timestamp>/<deviceName>
+  if [ -d "$DIR" ] && [ -z "$(ls -A "$DIR")" ]; then
+    rmdir "$DIR" && LOG "[INFO] Removed empty device folder: $DIR"
+  fi
+done < <(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d -print0)
+
 if [ $FAIL -ne 0 ]; then
   LOG "[ERROR] Some backups failed."
-  exit 2
+  # decide: exit with error or continue to prune old runs? We'll still prune.
 else
   LOG "[INFO] All backups succeeded."
 fi
 
 # 5) Prune old runs
 LOG "[INFO] Pruning runs older than $RETENTION_DAYS days..."
-find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d \
-  -mtime +"$RETENTION_DAYS" -print -exec rm -rf {} \;
+# Find directories (only under BACKUP_ROOT) older than RETENTION_DAYS
+# We’ll log each before removal.
+while IFS= read -r -d '' OLD_DIR; do
+  LOG "[INFO] Removing old run directory: $OLD_DIR"
+  rm -rf "$OLD_DIR"
+done < <(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +"$RETENTION_DAYS" -print0)
 LOG "[INFO] Prune complete."
