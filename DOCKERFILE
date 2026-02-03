@@ -13,6 +13,7 @@ RUN apt-get update \
       jq \
       ca-certificates \
       dos2unix \
+      nano \
  && rm -rf /var/lib/apt/lists/*
 
 # Create backup directory
