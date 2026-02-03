@@ -16,6 +16,11 @@ BACKUP_ROOT="${BACKUP_ROOT:-/backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 EXTRA_HOSTS="${EXTRA_HOSTS:-}"
 
+if ! [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
+  LOG "[WARN] RETENTION_DAYS must be a number, defaulting to 30."
+  RETENTION_DAYS=30
+fi
+
 # 1) Create run directory
 TIMESTAMP="$(date +'%Y%m%d_%H%M%S')"
 export BACKUP_DIR="${BACKUP_ROOT}/${TIMESTAMP}"
@@ -24,11 +29,17 @@ LOG "[INFO] New backup run: $BACKUP_DIR"
 
 # 2) Discover via mDNS
 LOG "[INFO] Discovering WLED via mDNS..."
-mapfile -t MDNS < <(
-  avahi-browse -r -p "$SERVICE" --terminate \
-    | awk -F';' '/^=/ {print $7".local"}' \
-    | sort -u
-)
+if command -v avahi-browse >/dev/null 2>&1; then
+  mapfile -t MDNS < <(
+    avahi-browse -r -p "$SERVICE" --terminate \
+      | awk -F';' '/^=/ {print $7".local"}' \
+      | sort -u \
+      || true
+  )
+else
+  LOG "[WARN] avahi-browse not found; skipping mDNS discovery."
+  MDNS=()
+fi
 
 # 3) Merge EXTRA_HOSTS if any
 HOSTS=( "${MDNS[@]}" )

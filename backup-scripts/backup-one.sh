@@ -60,7 +60,7 @@ LOG INFO "Backing up $HOST as '$DIR_NAME' → $HOST_DIR"
 if [ -n "${ENDPOINTS:-}" ]; then
   IFS=',' read -ra KEYS <<< "$ENDPOINTS"
 else
-  KEYS=( "cfg" "state" )
+  KEYS=( "cfg" "presets" "state" )
 fi
 if [ -n "${ADDITIONAL_ENDPOINTS:-}" ]; then
   IFS=',' read -ra EXTRA <<< "$ADDITIONAL_ENDPOINTS"
@@ -90,7 +90,12 @@ for KEY in "${KEYS[@]}"; do
       # pretty‐print
       if command -v /usr/bin/jq &>/dev/null; then
         LOG INFO "Formatting $OUT"
-        /usr/bin/jq . "$OUT" > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
+        if /usr/bin/jq . "$OUT" > "$OUT.tmp"; then
+          mv "$OUT.tmp" "$OUT"
+        else
+          rm -f "$OUT.tmp"
+          LOG WARN "Failed to format $OUT with jq"
+        fi
       fi
       break
     else
