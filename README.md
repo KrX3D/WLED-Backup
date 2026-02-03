@@ -86,8 +86,8 @@ The container runs `backup-discover.sh`, which:
 | `ADDITIONAL_ENDPOINTS` | *(empty)* | Appended to `ENDPOINTS` or defaults (e.g. `info,eff,pal`). |
 | `PROTOCOLS` | `http,https` | Protocol order to try for each endpoint. |
 | `SKIP_TLS_VERIFY` | `false` | Set to `true` to allow HTTPS with self-signed certs. |
-| `OFFLINE_OK` | `true` | When `true`, skips devices that do not respond to `cfg.json` and continues. |
-| `LOG_TO_FILE` | `false` | When `true`, write a timestamped log to `<BACKUP_ROOT>/<timestamp>.log`. |
+| `OFFLINE_OK` | `true` | When `true`, skips devices that do not respond to `cfg.json` instead of failing the whole run. |
+| `LOG_TO_FILE` | `false` | When `true`, write a per-run log to `<BACKUP_ROOT>/<timestamp>/backup.log`. |
 
 **Default endpoints:** `cfg`, `presets`, and `state`.  
 
@@ -151,7 +151,7 @@ This template example generalizes IP/MAC and adds an icon placeholder. Adjust pa
   <Category/>
   <WebUI/>
   <TemplateURL/>
-  <Icon>https://raw.githubusercontent.com/Aircoookie/WLED/master/wled00/data/favicon-192x192.png</Icon>
+  <Icon>https://raw.githubusercontent.com/wled/WLED/refs/heads/main/wled00/data/favicon.ico</Icon>
   <ExtraParams>--mac-address YOUR:MAC:OPTIONAL</ExtraParams>
   <PostArgs/>
   <CPUset/>

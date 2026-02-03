@@ -33,17 +33,12 @@ if ! [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
   RETENTION_DAYS=30
 fi
 
-if ! [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
-  LOG "[WARN] RETENTION_DAYS must be a number, defaulting to 30."
-  RETENTION_DAYS=30
-fi
-
 # 1) Create run directory
 TIMESTAMP="$(date +'%Y%m%d_%H%M%S')"
 export BACKUP_DIR="${BACKUP_ROOT}/${TIMESTAMP}"
 mkdir -p "$BACKUP_DIR"
 if [ "$LOG_TO_FILE" = "true" ]; then
-  LOG_FILE="${BACKUP_ROOT}/${TIMESTAMP}.log"
+  LOG_FILE="${BACKUP_DIR}/backup.log"
   export LOG_FILE
   : > "$LOG_FILE"
 fi
@@ -95,10 +90,12 @@ FAIL=0
 for i in "${!HOSTS[@]}"; do
   idx=$((i+1))
   H="${HOSTS[i]}"
+  LOG INFO "----- Starting backup ${idx}/${#HOSTS[@]}: ${H} -----"
   if ! "$SCRIPT" "$H" "$idx"; then
     LOG ERROR "backup-one.sh failed for $H"
     FAIL=1
   fi
+  LOG INFO "----- Finished backup ${idx}/${#HOSTS[@]}: ${H} -----"
 done
 
 # 4a) Remove any empty device folders in this run

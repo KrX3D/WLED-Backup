@@ -69,6 +69,7 @@ fi
 HOST_DIR="$RUN_DIR/$DIR_NAME"
 mkdir -p "$HOST_DIR"
 LOG INFO "Backing up $HOST as '$DIR_NAME' → $HOST_DIR"
+LOG INFO "----- Device backup start -----"
 
 # 3) Collect keys
 if [ -n "${ENDPOINTS:-}" ]; then
@@ -126,3 +127,4 @@ for KEY in "${KEYS[@]}"; do
 done
 
 LOG INFO "Completed backup for $HOST ($DIR_NAME)"
+LOG INFO "----- Device backup end -----"
