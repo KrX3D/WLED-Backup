@@ -15,6 +15,7 @@ https://blog.mbwarez.dk/posts/2025/03/wled-backup-script/
 - [Usage](#usage)  
   - [Docker CLI](#docker-cli)  
   - [Script Details](#script-details)  
+- [Keeping the latest backup per device](#keeping-the-latest-backup-per-device)  
 - [Scheduling Backups](#scheduling-backups)  
 - [CI & Unraid Packaging](#ci--unraid-packaging)  
 - [Credits & License](#credits--license)  
@@ -73,7 +74,8 @@ The container runs `backup-discover.sh`, which:
 1) Discovers WLED devices via mDNS  
 2) Adds any `EXTRA_HOSTS` you specify  
 3) Backs up JSON endpoints to a timestamped folder  
-4) Prunes old runs based on `RETENTION_DAYS`  
+4) Optionally updates the `latest/` snapshot per device (see `KEEP_LATEST`)  
+5) Prunes old runs based on `RETENTION_DAYS`  
 
 #### Environment variables
 
@@ -88,11 +90,52 @@ The container runs `backup-discover.sh`, which:
 | `SKIP_TLS_VERIFY` | `false` | Set to `true` to allow HTTPS with self-signed certs. |
 | `OFFLINE_OK` | `true` | When `true`, skips devices that do not respond to `cfg.json` instead of failing the whole run. |
 | `LOG_TO_FILE` | `false` | When `true`, write a per-run log to `<BACKUP_ROOT>/<timestamp>/backup.log`. |
+| `KEEP_LATEST` | `false` | When `true`, maintains a `<BACKUP_ROOT>/latest/<device>/` folder for each device. Always holds the most recent **complete** backup for that device and is never pruned by `RETENTION_DAYS`. See [Keeping the latest backup per device](#keeping-the-latest-backup-per-device). |
 
 **Default endpoints:** `cfg`, `presets`, and `state`.  
 
 **Common additional endpoints:** `info`, `si`, `nodes`, `eff`, `palx`, `fxdata`, `net`, `live`, `pal`.  
 > Note: endpoint availability can vary by WLED version. Use `ENDPOINTS` or `ADDITIONAL_ENDPOINTS` to tune what you need.
+
+---
+
+## Keeping the latest backup per device
+
+By default, a device's backups are pruned once they age past `RETENTION_DAYS`. If a device goes offline for longer than that window, its backups disappear entirely.
+
+Enable `KEEP_LATEST=true` to maintain a permanent `latest/` folder alongside the normal timestamped runs:
+
+```
+/backups/
+  latest/                  ← never pruned
+    living-room/           ← most recent complete backup for this device
+      cfg.json
+      presets.json
+      state.json
+    bedroom/
+      cfg.json
+      ...
+  20250501_020000/         ← normal timestamped run (pruned after RETENTION_DAYS)
+    living-room/
+    bedroom/
+  20250502_020000/
+    ...
+```
+
+**Behaviour:**
+- The `latest/<device>/` folder is updated only after **all** configured endpoints for a device download successfully — partial or failed backups are never promoted to `latest/`.
+- If a device is offline (and `OFFLINE_OK=true`), the existing `latest/<device>/` entry is left untouched, so you always retain the last known-good backup.
+- The `latest/` folder is excluded from `RETENTION_DAYS` pruning regardless of its age.
+
+**Example:**
+
+```bash
+docker run --rm \
+  --network=host \
+  -v /path/to/backups:/backups \
+  -e KEEP_LATEST=true \
+  ghcr.io/krx3d/wled-backup:latest
+```
 
 ---
 
