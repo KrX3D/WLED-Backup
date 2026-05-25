@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 #
 # backup-one.sh <hostname> <index>
-#   - Fixed LOG to not pass extra args to date.
-#   - Uses absolute paths for curl & jq to avoid PATH issues.
+#   Backs up a single WLED device. Called by backup-discover.sh.
 
 set -euo pipefail
 
 # LOG <LEVEL> <MESSAGE...>
 LOG() {
   local level="$1"; shift
-  # date only gets its format, all other args go to echo
   local ts
   ts=$(/bin/date +'%Y-%m-%d %H:%M:%S')
   local context="device"
@@ -40,12 +38,22 @@ if [ "${SKIP_TLS_VERIFY:-false}" = "true" ]; then
   LOG WARN "TLS certificate verification is disabled"
 fi
 
-# 1) Fetch cfg.json for name
+# Protocol order (used for both name fetch and endpoint downloads)
+IFS=',' read -ra PROT_ARRAY <<< "${PROTOCOLS:-http,https}"
+
+# 1) Fetch cfg.json for name, respecting PROTOCOLS order
 TMP_CFG="$(mktemp)"
-if ! "${CURL_CMD[@]}" "http://$HOST/cfg.json" -o "$TMP_CFG" \
-    && ! "${CURL_CMD[@]}" "https://$HOST/cfg.json" -o "$TMP_CFG"; then
-  LOG WARN "Could not fetch cfg.json from $HOST"
+NAME_FETCHED=false
+for P in "${PROT_ARRAY[@]}"; do
+  if "${CURL_CMD[@]}" "$P://$HOST/cfg.json" -o "$TMP_CFG" 2>/dev/null; then
+    NAME_FETCHED=true
+    break
+  fi
+done
+
+if [ "$NAME_FETCHED" != "true" ]; then
   rm -f "$TMP_CFG"
+  LOG WARN "Could not fetch cfg.json from $HOST"
   if [ "$OFFLINE_OK" = "true" ]; then
     LOG WARN "Skipping $HOST because it appears offline (OFFLINE_OK=true)."
     exit 0
@@ -84,10 +92,7 @@ fi
 
 LOG INFO "Endpoints: ${KEYS[*]} | Protocols: ${PROTOCOLS:-http,https} | SKIP_TLS_VERIFY=${SKIP_TLS_VERIFY:-false}"
 
-# 4) Protocol order
-IFS=',' read -ra PROT_ARRAY <<< "${PROTOCOLS:-http,https}"
-
-# 5) Loop and fetch each key
+# 4) Loop and fetch each key
 for KEY in "${KEYS[@]}"; do
   case "$KEY" in
     cfg)     PATH_SUFFIX="cfg.json"     ;;
@@ -104,7 +109,7 @@ for KEY in "${KEYS[@]}"; do
     if "${CURL_CMD[@]}" "$URL" -o "$OUT"; then
       LOG INFO "Saved $OUT"
       SUCCESS=true
-      # pretty‐print
+      # pretty-print
       if command -v /usr/bin/jq &>/dev/null; then
         LOG INFO "Formatting $OUT"
         if /usr/bin/jq . "$OUT" > "$OUT.tmp"; then
@@ -127,4 +132,15 @@ for KEY in "${KEYS[@]}"; do
 done
 
 LOG INFO "Completed backup for $HOST ($DIR_NAME)"
+
+# 5) Update latest snapshot if KEEP_LATEST is enabled.
+#    Only runs after all endpoints succeed, so the latest folder always
+#    contains a complete backup — never a partial one.
+if [ "${KEEP_LATEST:-false}" = "true" ] && [ -n "${LATEST_DIR:-}" ]; then
+  LOG INFO "Updating latest backup → $LATEST_DIR/$DIR_NAME"
+  rm -rf "${LATEST_DIR:?}/$DIR_NAME"
+  cp -r "$HOST_DIR" "$LATEST_DIR/$DIR_NAME"
+  LOG INFO "Latest backup updated."
+fi
+
 LOG INFO "----- Device backup end -----"

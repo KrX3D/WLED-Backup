@@ -27,6 +27,7 @@ BACKUP_ROOT="${BACKUP_ROOT:-/backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 EXTRA_HOSTS="${EXTRA_HOSTS:-}"
 LOG_TO_FILE="${LOG_TO_FILE:-false}"
+KEEP_LATEST="${KEEP_LATEST:-false}"
 
 if ! [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
   LOG WARN "RETENTION_DAYS must be a number, defaulting to 30."
@@ -43,8 +44,18 @@ if [ "$LOG_TO_FILE" = "true" ]; then
   : > "$LOG_FILE"
 fi
 
+# Export variables needed by backup-one.sh
+export BACKUP_ROOT
+export KEEP_LATEST
+LATEST_DIR="${BACKUP_ROOT}/latest"
+export LATEST_DIR
+if [ "$KEEP_LATEST" = "true" ]; then
+  mkdir -p "$LATEST_DIR"
+  LOG INFO "KEEP_LATEST enabled; latest backups will be kept in: $LATEST_DIR"
+fi
+
 LOG INFO "New backup run: $BACKUP_DIR"
-LOG INFO "Settings: BACKUP_ROOT=$BACKUP_ROOT RETENTION_DAYS=$RETENTION_DAYS EXTRA_HOSTS=${EXTRA_HOSTS:-<none>} ENDPOINTS=${ENDPOINTS:-<default>} ADDITIONAL_ENDPOINTS=${ADDITIONAL_ENDPOINTS:-<none>} PROTOCOLS=${PROTOCOLS:-http,https} SKIP_TLS_VERIFY=${SKIP_TLS_VERIFY:-false} LOG_TO_FILE=$LOG_TO_FILE OFFLINE_OK=${OFFLINE_OK:-true}"
+LOG INFO "Settings: BACKUP_ROOT=$BACKUP_ROOT RETENTION_DAYS=$RETENTION_DAYS EXTRA_HOSTS=${EXTRA_HOSTS:-<none>} ENDPOINTS=${ENDPOINTS:-<default>} ADDITIONAL_ENDPOINTS=${ADDITIONAL_ENDPOINTS:-<none>} PROTOCOLS=${PROTOCOLS:-http,https} SKIP_TLS_VERIFY=${SKIP_TLS_VERIFY:-false} LOG_TO_FILE=$LOG_TO_FILE OFFLINE_OK=${OFFLINE_OK:-true} KEEP_LATEST=$KEEP_LATEST"
 
 # 2) Discover via mDNS
 LOG INFO "Discovering WLED via mDNS..."
@@ -126,16 +137,19 @@ fi
 
 # --- 5) Prune old runs ---
 #
-# find’s -mtime semantics: 
+# find's -mtime semantics:
 #   -mtime +n matches items whose data was last modified *strictly more than* n*24h ago.
 #   E.g., -mtime +0 matches files modified more than 24h ago.
 #
 # If RETENTION_DAYS=1, we want to remove runs older than 24h. I.e., use -mtime +0.
 # If RETENTION_DAYS=30, remove runs older than 30*24h; I.e., -mtime +29 (strictly >29 days),
-# but often admins want "keep last N days, delete anything older than N days". 
+# but often admins want "keep last N days, delete anything older than N days".
 # Using -mtime +$((RETENTION_DAYS-1)) approximates that.
 #
 # For RETENTION_DAYS <= 1, we use -mtime +0 (remove >24h). For >1, use +RETENTION_DAYS-1.
+#
+# The "latest" folder is always excluded from pruning regardless of KEEP_LATEST,
+# so it is never accidentally deleted.
 
 if [ "$RETENTION_DAYS" -le 1 ]; then
   MTDAYS=0
@@ -147,5 +161,5 @@ LOG INFO "Pruning runs older than ${RETENTION_DAYS} day(s) (find -mtime +${MTDAY
 while IFS= read -r -d '' OLD_DIR; do
   LOG INFO "Removing old run directory: $OLD_DIR"
   rm -rf "$OLD_DIR"
-done < <(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +"$MTDAYS" -print0)
+done < <(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -not -name "latest" -mtime +"$MTDAYS" -print0)
 LOG INFO "Prune complete."
