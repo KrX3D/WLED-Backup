@@ -209,6 +209,7 @@ This template example generalizes IP/MAC and adds an icon placeholder. Adjust pa
   <Config Name="SKIP_TLS_VERIFY" Target="SKIP_TLS_VERIFY" Default="true" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
   <Config Name="OFFLINE_OK" Target="OFFLINE_OK" Default="true" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
   <Config Name="LOG_TO_FILE" Target="LOG_TO_FILE" Default="false" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">false</Config>
+  <Config Name="KEEP_LATEST" Target="KEEP_LATEST" Default="false" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">false</Config>
   <Config Name="ENDPOINTS" Target="ENDPOINTS" Default="cfg,presets,state,info,si,nodes,eff,palx,fxdata,net,live,pal" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">cfg,presets,state,info,si,nodes,eff,palx,fxdata,net,pal</Config>
   <TailscaleStateDir/>
 </Container>
