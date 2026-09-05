@@ -59,16 +59,19 @@ LOG INFO "Settings: BACKUP_ROOT=$BACKUP_ROOT RETENTION_DAYS=$RETENTION_DAYS EXTR
 
 # 2) Discover via mDNS
 LOG INFO "Discovering WLED via mDNS..."
+MDNS=()
 if command -v avahi-browse >/dev/null 2>&1; then
-  mapfile -t MDNS < <(
-    avahi-browse -r -p "$SERVICE" --terminate \
-      | awk -F';' '/^=/ {print $7".local"}' \
-      | sort -u \
-      || true
-  )
+  AVAHI_OUT="$(mktemp)"
+  AVAHI_ERR="$(mktemp)"
+  if avahi-browse -r -p "$SERVICE" --terminate >"$AVAHI_OUT" 2>"$AVAHI_ERR"; then
+    mapfile -t MDNS < <(awk -F';' '/^=/ {print $7".local"}' "$AVAHI_OUT" | sort -u)
+  else
+    LOG WARN "avahi-browse failed: $(tr '\n' ' ' < "$AVAHI_ERR")"
+    LOG WARN "mDNS discovery may not work without access to the host's D-Bus/Avahi sockets (--network=host alone is not enough; also mount /var/run/dbus and the avahi-daemon socket, or run avahi-daemon on the host)."
+  fi
+  rm -f "$AVAHI_OUT" "$AVAHI_ERR"
 else
   LOG WARN "avahi-browse not found; skipping mDNS discovery."
-  MDNS=()
 fi
 
 # 3) Merge EXTRA_HOSTS if any
@@ -84,10 +87,11 @@ readarray -t HOSTS < <(printf '%s\n' "${HOSTS[@]}" | grep -v '^$' | sort -u)
 
 if [ ${#HOSTS[@]} -eq 0 ]; then
   LOG INFO "No hosts found."
-  # Remove the empty run directory, since nothing to back up
-  if rmdir "$BACKUP_DIR"; then
-    LOG INFO "Removed empty run directory: $BACKUP_DIR"
-  fi
+  # Remove the run directory, since nothing to back up. It may contain only
+  # backup.log (when LOG_TO_FILE=true), so rmdir alone would fail here.
+  unset LOG_FILE
+  rm -rf "$BACKUP_DIR"
+  LOG INFO "Removed empty run directory: $BACKUP_DIR"
   exit 0
 fi
 

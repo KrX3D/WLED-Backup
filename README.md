@@ -68,6 +68,8 @@ docker run --rm \
 - mDNS discovery requires host networking (`--network=host`) so Avahi can see your LAN.
 - Backups are organized by timestamp under `/backups` (see [Script Details](#script-details)).
 
+**Troubleshooting mDNS discovery:** `--network=host` alone only gives the container access to the host's network interfaces, not the host's D-Bus/Avahi sockets that `avahi-browse` needs to talk to `avahi-daemon`. If discovery consistently finds 0 hosts, check the container logs for an `avahi-browse failed` warning; if you see one, either also mount `/var/run/dbus` and the Avahi daemon socket from the host, or use `EXTRA_HOSTS` to back up devices by hostname/IP without relying on mDNS.
+
 ### Script Details
 
 The container runs `backup-discover.sh`, which:
