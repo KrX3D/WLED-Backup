@@ -175,7 +175,9 @@ docker start "${DOCKER_CONTAINER}"
 
 ### Unraid Template XML (example)
 
-This template example generalizes IP/MAC and adds an icon placeholder. Adjust paths and variables to your environment.
+This is a real-world template, generalized (personal hostnames, IP/MAC, and install date removed). It uses a dedicated `br0` network (its own LAN IP) rather than `--network=host`, which means mDNS discovery isn't reachable from the container (see [Troubleshooting mDNS discovery](#docker-cli) above) — so it lists every device explicitly via `EXTRA_HOSTS` instead of relying on discovery. This is a solid pattern if you'd rather give the container its own IP than use host networking.
+
+The same file is also checked into this repo as [`unraid-template.xml`](unraid-template.xml), which you can point Unraid's **Template URL** field at directly.
 
 ```xml
 <?xml version="1.0"?>
@@ -184,18 +186,20 @@ This template example generalizes IP/MAC and adds an icon placeholder. Adjust pa
   <Repository>ghcr.io/krx3d/wled-backup:latest</Repository>
   <Registry/>
   <Network>br0</Network>
-  <MyIP>YOUR.IP.ADDR.HERE</MyIP>
+  <MyIP/>
+  <MyMAC/>
   <Shell>bash</Shell>
   <Privileged>true</Privileged>
   <Support/>
   <Project/>
+  <ReadMe/>
   <Overview>&#13;
   -e ENDPOINTS="cfg,presets,state,info,si,nodes,eff,palx,fxdata,net,live,pal" </Overview>
   <Category/>
   <WebUI/>
   <TemplateURL/>
   <Icon>https://raw.githubusercontent.com/wled/WLED/refs/heads/main/wled00/data/favicon.ico</Icon>
-  <ExtraParams>--mac-address YOUR:MAC:OPTIONAL</ExtraParams>
+  <ExtraParams/>
   <PostArgs/>
   <CPUset/>
   <DateInstalled>0</DateInstalled>
@@ -203,14 +207,14 @@ This template example generalizes IP/MAC and adds an icon placeholder. Adjust pa
   <DonateLink/>
   <Requires/>
   <Config Name="backups" Target="/backups" Default="/mnt/user/backup/wled/" Mode="rw" Description="" Type="Path" Display="always" Required="false" Mask="false">/mnt/user/backup/wled/</Config>
-  <Config Name="EXTRA_HOSTS" Target="EXTRA_HOSTS" Default="" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">deskbar.lan,example.lan</Config>
-  <Config Name="RETENTION_DAYS" Target="RETENTION_DAYS" Default="7" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">14</Config>
+  <Config Name="EXTRA_HOSTS" Target="EXTRA_HOSTS" Default="" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">living-room.lan,bedroom.lan,kitchen.lan</Config>
+  <Config Name="RETENTION_DAYS" Target="RETENTION_DAYS" Default="7" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">7</Config>
   <Config Name="PROTOCOLS" Target="PROTOCOLS" Default="http,https" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">http,https</Config>
   <Config Name="SKIP_TLS_VERIFY" Target="SKIP_TLS_VERIFY" Default="true" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="ENDPOINTS" Target="ENDPOINTS" Default="cfg,presets,state,info,si,nodes,eff,palx,fxdata,net,live,pal" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">cfg,presets,state,info,si,nodes,eff,palx,fxdata,net,live,pal</Config>
   <Config Name="OFFLINE_OK" Target="OFFLINE_OK" Default="true" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
-  <Config Name="LOG_TO_FILE" Target="LOG_TO_FILE" Default="false" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">false</Config>
-  <Config Name="KEEP_LATEST" Target="KEEP_LATEST" Default="false" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">false</Config>
-  <Config Name="ENDPOINTS" Target="ENDPOINTS" Default="cfg,presets,state,info,si,nodes,eff,palx,fxdata,net,live,pal" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">cfg,presets,state,info,si,nodes,eff,palx,fxdata,net,pal</Config>
+  <Config Name="LOG_TO_FILE" Target="LOG_TO_FILE" Default="true" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="KEEP_LATEST" Target="KEEP_LATEST" Default="true" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
   <TailscaleStateDir/>
 </Container>
 ```

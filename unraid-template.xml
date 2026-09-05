@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>wled-backup</Name>
+  <Repository>ghcr.io/krx3d/wled-backup:latest</Repository>
+  <Registry/>
+  <Network>br0</Network>
+  <MyIP/>
+  <MyMAC/>
+  <Shell>bash</Shell>
+  <Privileged>true</Privileged>
+  <Support/>
+  <Project/>
+  <ReadMe/>
+  <Overview>&#13;
+  -e ENDPOINTS="cfg,presets,state,info,si,nodes,eff,palx,fxdata,net,live,pal" </Overview>
+  <Category/>
+  <WebUI/>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/wled/WLED/refs/heads/main/wled00/data/favicon.ico</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled>0</DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="backups" Target="/backups" Default="/mnt/user/backup/wled/" Mode="rw" Description="" Type="Path" Display="always" Required="false" Mask="false">/mnt/user/backup/wled/</Config>
+  <Config Name="EXTRA_HOSTS" Target="EXTRA_HOSTS" Default="" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">living-room.lan,bedroom.lan,kitchen.lan</Config>
+  <Config Name="RETENTION_DAYS" Target="RETENTION_DAYS" Default="7" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">7</Config>
+  <Config Name="PROTOCOLS" Target="PROTOCOLS" Default="http,https" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">http,https</Config>
+  <Config Name="SKIP_TLS_VERIFY" Target="SKIP_TLS_VERIFY" Default="true" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="ENDPOINTS" Target="ENDPOINTS" Default="cfg,presets,state,info,si,nodes,eff,palx,fxdata,net,live,pal" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">cfg,presets,state,info,si,nodes,eff,palx,fxdata,net,live,pal</Config>
+  <Config Name="OFFLINE_OK" Target="OFFLINE_OK" Default="true" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="LOG_TO_FILE" Target="LOG_TO_FILE" Default="true" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="KEEP_LATEST" Target="KEEP_LATEST" Default="true" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <TailscaleStateDir/>
+</Container>
