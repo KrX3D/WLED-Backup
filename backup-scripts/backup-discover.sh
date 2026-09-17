@@ -25,6 +25,9 @@ SERVICE="_wled._tcp"
 SCRIPT="/usr/local/bin/backup-one.sh"
 BACKUP_ROOT="${BACKUP_ROOT:-/backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
+RETENTION_WEEKS="${RETENTION_WEEKS:-0}"
+RETENTION_MONTHS="${RETENTION_MONTHS:-0}"
+RETENTION_YEARS="${RETENTION_YEARS:-0}"
 EXTRA_HOSTS="${EXTRA_HOSTS:-}"
 LOG_TO_FILE="${LOG_TO_FILE:-false}"
 KEEP_LATEST="${KEEP_LATEST:-false}"
@@ -33,6 +36,12 @@ if ! [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
   LOG WARN "RETENTION_DAYS must be a number, defaulting to 30."
   RETENTION_DAYS=30
 fi
+for VAR in RETENTION_WEEKS RETENTION_MONTHS RETENTION_YEARS; do
+  if ! [[ "${!VAR}" =~ ^[0-9]+$ ]]; then
+    LOG WARN "$VAR must be a number, defaulting to 0 (disabled)."
+    printf -v "$VAR" '%s' 0
+  fi
+done
 
 # 1) Create run directory
 TIMESTAMP="$(date +'%Y%m%d_%H%M%S')"
@@ -55,7 +64,7 @@ if [ "$KEEP_LATEST" = "true" ]; then
 fi
 
 LOG INFO "New backup run: $BACKUP_DIR"
-LOG INFO "Settings: BACKUP_ROOT=$BACKUP_ROOT RETENTION_DAYS=$RETENTION_DAYS EXTRA_HOSTS=${EXTRA_HOSTS:-<none>} ENDPOINTS=${ENDPOINTS:-<default>} ADDITIONAL_ENDPOINTS=${ADDITIONAL_ENDPOINTS:-<none>} PROTOCOLS=${PROTOCOLS:-http,https} SKIP_TLS_VERIFY=${SKIP_TLS_VERIFY:-false} LOG_TO_FILE=$LOG_TO_FILE OFFLINE_OK=${OFFLINE_OK:-true} KEEP_LATEST=$KEEP_LATEST"
+LOG INFO "Settings: BACKUP_ROOT=$BACKUP_ROOT RETENTION_DAYS=$RETENTION_DAYS RETENTION_WEEKS=$RETENTION_WEEKS RETENTION_MONTHS=$RETENTION_MONTHS RETENTION_YEARS=$RETENTION_YEARS EXTRA_HOSTS=${EXTRA_HOSTS:-<none>} ENDPOINTS=${ENDPOINTS:-<default>} ADDITIONAL_ENDPOINTS=${ADDITIONAL_ENDPOINTS:-<none>} PROTOCOLS=${PROTOCOLS:-http,https} SKIP_TLS_VERIFY=${SKIP_TLS_VERIFY:-false} LOG_TO_FILE=$LOG_TO_FILE OFFLINE_OK=${OFFLINE_OK:-true} KEEP_LATEST=$KEEP_LATEST"
 
 # 2) Discover via mDNS
 LOG INFO "Discovering WLED via mDNS..."
@@ -141,29 +150,91 @@ fi
 
 # --- 5) Prune old runs ---
 #
-# find's -mtime semantics:
-#   -mtime +n matches items whose data was last modified *strictly more than* n*24h ago.
-#   E.g., -mtime +0 matches files modified more than 24h ago.
+# Tiered retention (grandfather-father-son). A run is kept if ANY rule keeps it:
+#   RETENTION_DAYS   - every run younger than N*24h (N <= 1 means 24h).
+#   RETENTION_WEEKS  - the newest run of each of the last N ISO weeks (Mon-Sun)
+#                      that have a backup.
+#   RETENTION_MONTHS - the newest run of each of the last N calendar months
+#                      that have a backup.
+#   RETENTION_YEARS  - the newest run of each of the last N calendar years
+#                      that have a backup.
+# Weeks/months/years are counted by buckets that actually contain a run, so
+# a gap in backups (e.g. the container was down for a while) never makes the
+# older weekly/monthly/yearly runs disappear. The current week/month/year
+# counts as one of the N.
 #
-# If RETENTION_DAYS=1, we want to remove runs older than 24h. I.e., use -mtime +0.
-# If RETENTION_DAYS=30, remove runs older than 30*24h; I.e., -mtime +29 (strictly >29 days),
-# but often admins want "keep last N days, delete anything older than N days".
-# Using -mtime +$((RETENTION_DAYS-1)) approximates that.
-#
-# For RETENTION_DAYS <= 1, we use -mtime +0 (remove >24h). For >1, use +RETENTION_DAYS-1.
+# A run's time comes from its YYYYMMDD_HHMMSS folder name, falling back to the
+# folder's mtime for other names, so copying or restoring the backup folder
+# does not reset ages. Runs without any device folder (e.g. only backup.log
+# because every device was offline) are never chosen as a weekly/monthly/yearly
+# run; they only live for RETENTION_DAYS.
 #
 # The "latest" folder is always excluded from pruning regardless of KEEP_LATEST,
 # so it is never accidentally deleted.
 
-if [ "$RETENTION_DAYS" -le 1 ]; then
-  MTDAYS=0
-else
-  MTDAYS=$((RETENTION_DAYS - 1))
-fi
+# run_info <dir>: prints "<epoch> <iso-week> <month> <year>" for a run folder.
+run_info() {
+  local dir="$1" name="${1##*/}"
+  if [[ "$name" =~ ^([0-9]{4})([0-9]{2})([0-9]{2})_([0-9]{2})([0-9]{2})([0-9]{2})$ ]]; then
+    if date -d "${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]} ${BASH_REMATCH[4]}:${BASH_REMATCH[5]}:${BASH_REMATCH[6]}" \
+         +'%s %G-W%V %Y-%m %Y' 2>/dev/null; then
+      return 0
+    fi
+  fi
+  date -r "$dir" +'%s %G-W%V %Y-%m %Y'
+}
 
-LOG INFO "Pruning runs older than ${RETENTION_DAYS} day(s) (find -mtime +${MTDAYS})..."
-while IFS= read -r -d '' OLD_DIR; do
-  LOG INFO "Removing old run directory: $OLD_DIR"
-  rm -rf "$OLD_DIR"
-done < <(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -not -name "latest" -mtime +"$MTDAYS" -print0)
+declare -A BUCKET_SEEN=()
+declare -A BUCKET_COUNT=( [weekly]=0 [monthly]=0 [yearly]=0 )
+
+# claim_bucket <period> <key> <limit>
+#   Succeeds if <key> is a bucket not seen before and fewer than <limit> buckets
+#   of <period> have been kept so far. Runs are visited newest first, so the
+#   run that claims a bucket is the newest run in it.
+claim_bucket() {
+  local period="$1" key="$2" limit="$3"
+  local count="${BUCKET_COUNT[$period]}"
+  if [ "$limit" -eq 0 ] || [ "$count" -ge "$limit" ] || [ -n "${BUCKET_SEEN["$period:$key"]:-}" ]; then
+    return 1
+  fi
+  BUCKET_SEEN["$period:$key"]=1
+  BUCKET_COUNT[$period]=$(( count + 1 ))
+}
+
+if [ "$RETENTION_DAYS" -le 1 ]; then
+  KEEP_SECONDS=86400
+else
+  KEEP_SECONDS=$(( 10#$RETENTION_DAYS * 86400 ))
+fi
+NOW="$(date +%s)"
+
+LOG INFO "Pruning runs: keeping everything from the last ${RETENTION_DAYS} day(s), plus the newest run of the last ${RETENTION_WEEKS} week(s), ${RETENTION_MONTHS} month(s) and ${RETENTION_YEARS} year(s)..."
+while IFS=' ' read -r -d '' RUN_EPOCH RUN_WEEK RUN_MONTH RUN_YEAR RUN_DIR; do
+  REASONS=()
+  if [ $(( NOW - RUN_EPOCH )) -lt "$KEEP_SECONDS" ]; then
+    REASONS+=( "daily" )
+  fi
+  if [ -n "$(find "$RUN_DIR" -mindepth 1 -maxdepth 1 -type d -print -quit)" ]; then
+    if claim_bucket weekly "$RUN_WEEK" "$RETENTION_WEEKS"; then REASONS+=( "weekly:$RUN_WEEK" ); fi
+    if claim_bucket monthly "$RUN_MONTH" "$RETENTION_MONTHS"; then REASONS+=( "monthly:$RUN_MONTH" ); fi
+    if claim_bucket yearly "$RUN_YEAR" "$RETENTION_YEARS"; then REASONS+=( "yearly:$RUN_YEAR" ); fi
+  fi
+
+  if [ ${#REASONS[@]} -eq 0 ]; then
+    LOG INFO "Removing old run directory: $RUN_DIR"
+    rm -rf "$RUN_DIR"
+  elif [ "${REASONS[0]}" != "daily" ]; then
+    LOG INFO "Keeping $RUN_DIR ($(IFS=,; echo "${REASONS[*]}"))"
+  fi
+done < <(
+  find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -not -name "latest" -print0 |
+    while IFS= read -r -d '' DIR; do
+      if INFO="$(run_info "$DIR")"; then
+        printf '%s %s\0' "$INFO" "$DIR"
+      else
+        LOG WARN "Could not determine the age of $DIR; keeping it." >&2
+      fi
+    done |
+    sort -z -k1,1nr
+)
 LOG INFO "Prune complete."

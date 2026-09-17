@@ -27,6 +27,9 @@
   <Config Name="backups" Target="/backups" Default="/mnt/user/backup/wled/" Mode="rw" Description="" Type="Path" Display="always" Required="false" Mask="false">/mnt/user/backup/wled/</Config>
   <Config Name="EXTRA_HOSTS" Target="EXTRA_HOSTS" Default="" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">living-room.lan,bedroom.lan,kitchen.lan</Config>
   <Config Name="RETENTION_DAYS" Target="RETENTION_DAYS" Default="7" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">7</Config>
+  <Config Name="RETENTION_WEEKS" Target="RETENTION_WEEKS" Default="0" Mode="" Description="Also keep the newest backup of each of the last N weeks (0 = off)" Type="Variable" Display="always" Required="false" Mask="false">0</Config>
+  <Config Name="RETENTION_MONTHS" Target="RETENTION_MONTHS" Default="0" Mode="" Description="Also keep the newest backup of each of the last N months (0 = off)" Type="Variable" Display="always" Required="false" Mask="false">0</Config>
+  <Config Name="RETENTION_YEARS" Target="RETENTION_YEARS" Default="0" Mode="" Description="Also keep the newest backup of each of the last N years (0 = off)" Type="Variable" Display="always" Required="false" Mask="false">0</Config>
   <Config Name="PROTOCOLS" Target="PROTOCOLS" Default="http,https" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">http,https</Config>
   <Config Name="SKIP_TLS_VERIFY" Target="SKIP_TLS_VERIFY" Default="true" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
   <Config Name="ENDPOINTS" Target="ENDPOINTS" Default="cfg,presets,state,info,si,nodes,eff,palx,fxdata,net,live,pal" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">cfg,presets,state,info,si,nodes,eff,palx,fxdata,net,live,pal</Config>
