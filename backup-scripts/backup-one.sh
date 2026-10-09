@@ -59,19 +59,26 @@ IFS=',' read -ra PROT_ARRAY <<< "${PROTOCOLS:-http,https}"
 # 1) Fetch cfg.json for name, respecting PROTOCOLS order
 TMP_CFG="$(mktemp)"
 NAME_FETCHED=false
+REACHED_BAD=false
 for P in "${PROT_ARRAY[@]}"; do
-  if "${CURL_CMD[@]}" "$P://$HOST/cfg.json" -o "$TMP_CFG" 2>/dev/null; then
+  if FINAL_URL=$("${CURL_CMD[@]}" "$P://$HOST/cfg.json" -o "$TMP_CFG" -w '%{url_effective}' 2>/dev/null); then
     gunzip_if_needed "$TMP_CFG"
     if /usr/bin/jq -e . "$TMP_CFG" >/dev/null 2>&1; then
       NAME_FETCHED=true
       break
     fi
-    LOG WARN "$P://$HOST/cfg.json did not return valid JSON"
+    REACHED_BAD=true
+    LOG WARN "$P://$HOST/cfg.json did not return JSON (ended up at $FINAL_URL); a redirect or reverse proxy in front of the device?"
   fi
 done
 
 if [ "$NAME_FETCHED" != "true" ]; then
   rm -f "$TMP_CFG"
+  if [ "$REACHED_BAD" = "true" ]; then
+    # The host answered, so it is not offline: never hide this behind OFFLINE_OK.
+    LOG ERROR "$HOST answered but did not return a valid cfg.json (see warnings above)"
+    exit 2
+  fi
   LOG WARN "Could not fetch cfg.json from $HOST"
   if [ "$OFFLINE_OK" = "true" ]; then
     LOG WARN "Skipping $HOST because it appears offline (OFFLINE_OK=true)."
