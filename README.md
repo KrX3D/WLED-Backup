@@ -272,18 +272,20 @@ The same file is also checked into this repo as [`unraid-template.xml`](unraid-t
 
 ### `jq: parse error: Invalid numeric literal` / "backup-one.sh failed"
 
-Seen in October 2026 after the `.lan` hostnames were switched to a certificate for a purchased domain: every device
-started failing with this jq error. The devices (or whatever now answers for the `.lan` names, e.g. a reverse proxy)
-returned **gzip-compressed** bodies even for plain requests, so the saved `cfg.json` was binary, not JSON.
+Seen in October 2026 after the `.lan` names were pointed at a reverse proxy (OpenResty/Nginx Proxy Manager) with a certificate
+for a purchased domain. The proxy answered `http://<name>.lan/cfg.json` with `301 -> https://<name>.<domain>` **without the
+path**, so the request ended on the device's web UI (gzip-compressed HTML) instead of `cfg.json`, and jq failed on it.
+`https://<name>.lan` failed outright because the proxy has no certificate for `.lan`.
 
-- The scripts now call curl with `--compressed`, additionally unzip bodies that start with the gzip magic bytes
-  (`1f 8b`) but lack a `Content-Encoding` header, and treat any non-JSON answer as a failed fetch (next protocol,
-  then `deviceN` as folder name) instead of aborting.
-- If it happens again, check what the device really returns (from a machine on the LAN, not the stopped container):
-  `curl -skL -o - -w '
-%{http_code} %{url_effective}
-' http://<host>/cfg.json | head`.
-  Binary output means compression, HTML means a proxy/redirect/error page. Look at network or certificate changes first.
+- Fix on the config side: use the names that work through the proxy, e.g. `EXTRA_HOSTS=<name>.<domain>,...` with
+  `PROTOCOLS=https` (then `SKIP_TLS_VERIFY` can be `false`). Alternatively keep the path in the proxy redirect.
+- The scripts now use `curl --compressed`, unzip bodies with gzip magic bytes but no `Content-Encoding`, and validate
+  that `cfg.json` is JSON. A host that answers with non-JSON is reported as an **error** (it is not "offline", so
+  `OFFLINE_OK` does not hide it), and the warning shows the final URL after redirects.
+- To diagnose by hand (from a machine on the LAN, not the stopped container):
+  `curl -skL -o /dev/null -D - -w '%{http_code} %{url_effective}
+' http://<host>/cfg.json`.
+  A redirect to another host or an HTML `Content-Type` means a proxy/redirect is in the way.
 
 ---
 
