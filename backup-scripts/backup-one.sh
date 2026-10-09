@@ -32,11 +32,26 @@ RUN_DIR="${BACKUP_DIR:?BACKUP_DIR must be set}"
 OFFLINE_OK="${OFFLINE_OK:-true}"
 
 # Build curl command array
-CURL_CMD=( /usr/bin/curl -sSLf )
+# --compressed: some devices/proxies answer with gzip even for plain requests.
+CURL_CMD=( /usr/bin/curl -sSLf --compressed --connect-timeout 10 --max-time 60 )
 if [ "${SKIP_TLS_VERIFY:-false}" = "true" ]; then
   CURL_CMD+=( -k )
   LOG WARN "TLS certificate verification is disabled"
 fi
+
+# gunzip_if_needed <file>: some servers send gzip data without a
+# Content-Encoding header, which curl cannot decode. Detect the magic bytes.
+gunzip_if_needed() {
+  local f="$1"
+  if [ "$(head -c 2 "$f" | od -An -tx1 | tr -d ' 
+')" = "1f8b" ]; then
+    if gzip -dc "$f" > "$f.dec" 2>/dev/null; then
+      mv "$f.dec" "$f"
+    else
+      rm -f "$f.dec"
+    fi
+  fi
+}
 
 # Protocol order (used for both name fetch and endpoint downloads)
 IFS=',' read -ra PROT_ARRAY <<< "${PROTOCOLS:-http,https}"
@@ -46,8 +61,12 @@ TMP_CFG="$(mktemp)"
 NAME_FETCHED=false
 for P in "${PROT_ARRAY[@]}"; do
   if "${CURL_CMD[@]}" "$P://$HOST/cfg.json" -o "$TMP_CFG" 2>/dev/null; then
-    NAME_FETCHED=true
-    break
+    gunzip_if_needed "$TMP_CFG"
+    if /usr/bin/jq -e . "$TMP_CFG" >/dev/null 2>&1; then
+      NAME_FETCHED=true
+      break
+    fi
+    LOG WARN "$P://$HOST/cfg.json did not return valid JSON"
   fi
 done
 
@@ -64,7 +83,7 @@ fi
 # 2) Extract id.name
 DEV_NAME=""
 if command -v /usr/bin/jq &>/dev/null; then
-  DEV_NAME=$(/usr/bin/jq -r '.id.name // empty' "$TMP_CFG")
+  DEV_NAME=$(/usr/bin/jq -r '.id.name // empty' "$TMP_CFG" 2>/dev/null || true)
 fi
 rm -f "$TMP_CFG"
 
@@ -107,18 +126,19 @@ for KEY in "${KEYS[@]}"; do
     URL="$P://$HOST/$PATH_SUFFIX"
     LOG INFO "Trying $URL → $OUT"
     if "${CURL_CMD[@]}" "$URL" -o "$OUT"; then
-      LOG INFO "Saved $OUT"
-      SUCCESS=true
-      # pretty-print
+      gunzip_if_needed "$OUT"
+      # validate + pretty-print; a non-JSON answer counts as a failed fetch
       if command -v /usr/bin/jq &>/dev/null; then
-        LOG INFO "Formatting $OUT"
-        if /usr/bin/jq . "$OUT" > "$OUT.tmp"; then
+        if /usr/bin/jq . "$OUT" > "$OUT.tmp" 2>/dev/null; then
           mv "$OUT.tmp" "$OUT"
         else
-          rm -f "$OUT.tmp"
-          LOG WARN "Failed to format $OUT with jq"
+          rm -f "$OUT.tmp" "$OUT"
+          LOG WARN "$URL did not return valid JSON"
+          continue
         fi
       fi
+      LOG INFO "Saved $OUT"
+      SUCCESS=true
       break
     else
       LOG WARN "$P failed for $KEY"
