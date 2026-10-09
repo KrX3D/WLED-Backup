@@ -19,6 +19,7 @@ https://blog.mbwarez.dk/posts/2025/03/wled-backup-script/
 - [Tiered retention (weeks, months, years)](#tiered-retention-weeks-months-years)  
 - [Scheduling Backups](#scheduling-backups)  
 - [CI & Unraid Packaging](#ci--unraid-packaging)  
+- [Troubleshooting](#troubleshooting)  
 - [Credits & License](#credits--license)  
 
 ---
@@ -264,6 +265,25 @@ The same file is also checked into this repo as [`unraid-template.xml`](unraid-t
   <TailscaleStateDir/>
 </Container>
 ```
+
+---
+
+## Troubleshooting
+
+### `jq: parse error: Invalid numeric literal` / "backup-one.sh failed"
+
+Seen in October 2026 after the `.lan` hostnames were switched to a certificate for a purchased domain: every device
+started failing with this jq error. The devices (or whatever now answers for the `.lan` names, e.g. a reverse proxy)
+returned **gzip-compressed** bodies even for plain requests, so the saved `cfg.json` was binary, not JSON.
+
+- The scripts now call curl with `--compressed`, additionally unzip bodies that start with the gzip magic bytes
+  (`1f 8b`) but lack a `Content-Encoding` header, and treat any non-JSON answer as a failed fetch (next protocol,
+  then `deviceN` as folder name) instead of aborting.
+- If it happens again, check what the device really returns (from a machine on the LAN, not the stopped container):
+  `curl -skL -o - -w '
+%{http_code} %{url_effective}
+' http://<host>/cfg.json | head`.
+  Binary output means compression, HTML means a proxy/redirect/error page. Look at network or certificate changes first.
 
 ---
 
